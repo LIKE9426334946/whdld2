@@ -30,8 +30,8 @@ ID2COLOR = {v: k for k, v in PALETTE.items()}
 class WHDLDataset(Dataset):
     def __init__(self, root: str, split_file: str, transform=None):
         self.root = Path(root)
-        self.image_dir = self.root / "Images"
-        self.mask_dir = self.root / "ImagesPNG"
+        self.image_dir = self.root / "image/Images"
+        self.mask_dir = self.root / "imagesPNG/ImagesPNG"
         self.transform = transform
         with open(split_file, "r", encoding="utf-8") as f:
             self.names = [line.strip() for line in f if line.strip()]
