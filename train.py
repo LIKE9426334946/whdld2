@@ -160,13 +160,16 @@ def main():
         )
         scheduler.step()
 
-        record = {
-            "epoch": epoch,
-            "lr": optimizer.param_groups[0]["lr"],
-            "train_loss": train_loss,
-            **val_metrics,
-        }
-        history.append(record)
+
+        history.append({
+            "epoch": int(epoch),
+            "train_loss": float(train_loss),
+            "val_loss": float(val_loss),
+            "mIoU": float(val_metrics["mIoU"]),
+            "mPA": float(val_metrics["mPA"]),
+            "Precision": float(val_metrics["Precision"]),
+            "Recall": float(val_metrics["Recall"]),
+        })
         with open(log_dir / "history.json", "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
 
