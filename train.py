@@ -79,6 +79,16 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler, amp):
 
     return total_loss / len(loader.dataset)
 
+import numpy as np
+
+def to_serializable(v):
+    if isinstance(v, np.ndarray):
+        return v.tolist()
+    if isinstance(v, (np.float32, np.float64, np.int32, np.int64)):
+        return v.item()
+    if isinstance(v, torch.Tensor):
+        return v.detach().cpu().item() if v.numel() == 1 else v.detach().cpu().tolist()
+    return v
 
 def main():
     args = parse_args()
@@ -161,18 +171,20 @@ def main():
         scheduler.step()
 
 
-        history.append({
+        val_metrics = {k: to_serializable(v) for k, v in val_metrics.items()}
+
+        record = {
             "epoch": int(epoch),
+            "lr": float(optimizer.param_groups[0]["lr"]),
             "train_loss": float(train_loss),
-            "val_loss": float(val_loss),
-            "mIoU": float(val_metrics["mIoU"]),
-            "mPA": float(val_metrics["mPA"]),
-            "Precision": float(val_metrics["Precision"]),
-            "Recall": float(val_metrics["Recall"]),
-        })
+            **val_metrics,
+        }
+        
+        history.append(record)
+        
         with open(log_dir / "history.json", "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
-
+            
         print(
             f"Epoch [{epoch:03d}/{cfg['train']['epochs']:03d}] "
             f"train_loss={train_loss:.4f} val_loss={val_metrics['loss']:.4f} "
