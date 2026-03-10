@@ -68,7 +68,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler, amp):
         masks = batch["mask"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
-        with autocast(enabled=amp):
+        with autocast("cuda", enabled=amp):
             logits = model(images)
             loss = criterion(logits, masks)
 
