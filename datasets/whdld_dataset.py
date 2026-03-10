@@ -4,7 +4,7 @@ from typing import Dict, List
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
-
+import yaml
 
 CLASS_NAMES = [
     "vegetation",
