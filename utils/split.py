@@ -10,8 +10,8 @@ def load_cfg(path="config.yaml"):
 def make_split(data_root: str, output_dir: str, train_ratio=0.8, val_ratio=0.1, seed=42):
     cfg = load_cfg()
     data_root = Path(data_root)
-    image_dir = data_root / cfg["images_dir"]
-    mask_dir = data_root / cfg["masks_dir"]
+    image_dir = data_root / cfg["data"]["images_dir"]
+    mask_dir = data_root / cfg["data"]["masks_dir"]
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
