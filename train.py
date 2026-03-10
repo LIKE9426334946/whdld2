@@ -191,22 +191,28 @@ def main():
             f"mIoU={val_metrics['mIoU']:.4f} mPA={val_metrics['mPA']:.4f} "
             f"Precision={val_metrics['Precision']:.4f} Recall={val_metrics['Recall']:.4f}"
         )
-
+        current_miou = float(val_metrics["mIoU"])
+        
+        if current_miou > best_miou:
+            best_miou = current_miou
+        
         checkpoint = {
-            "epoch": epoch,
+            "epoch": int(epoch),
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "best_miou": best_miou,
+            "scaler_state_dict": scaler.state_dict() if cfg["train"]["amp"] else None,
+            "best_miou": float(best_miou),
             "config": cfg,
             "class_names": CLASS_NAMES,
         }
+        
         torch.save(checkpoint, ckpt_dir / "last.pth")
-
-        if val_metrics["mIoU"] > best_miou:
-            best_miou = val_metrics["mIoU"]
-            checkpoint["best_miou"] = best_miou
+        
+        if current_miou == best_miou:
             torch.save(checkpoint, ckpt_dir / "best.pth")
+            print(f"[*] Best model updated at epoch {epoch}, mIoU={best_miou:.4f}")
+
 
     print(f"Training finished. Best mIoU: {best_miou:.4f}")
     print(f"All outputs saved under: {exp_dir}")
