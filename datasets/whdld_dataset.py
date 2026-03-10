@@ -26,12 +26,15 @@ PALETTE = {
 
 ID2COLOR = {v: k for k, v in PALETTE.items()}
 
-
+def load_cfg(path="config.yaml"):
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
+cfg = load_cfg()
 class WHDLDataset(Dataset):
     def __init__(self, root: str, split_file: str, transform=None):
         self.root = Path(root)
-        self.image_dir = self.root / "image/Images"
-        self.mask_dir = self.root / "imagesPNG/ImagesPNG"
+        self.image_dir = self.root / cfg["images_dir"]
+        self.mask_dir = self.root / cfg["masks_dir"]
         self.transform = transform
         with open(split_file, "r", encoding="utf-8") as f:
             self.names = [line.strip() for line in f if line.strip()]
