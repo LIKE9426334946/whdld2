@@ -151,7 +151,7 @@ def main():
     )
     optimizer = AdamW(model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
     scheduler = CosineAnnealingLR(optimizer, T_max=cfg["train"]["epochs"], eta_min=cfg["scheduler"]["min_lr"])
-    scaler = GradScaler(enabled=cfg["train"]["amp"])
+    scaler = GradScaler("cuda", enabled=cfg["train"]["amp"])
     metric = SegmentationMetric(cfg["num_classes"])
 
     history = []
