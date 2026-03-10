@@ -20,47 +20,48 @@ from utils.seed import set_seed
 from utils.split import make_split
 from utils.visualize import save_visualizations
 
-
+# 解析参数
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="config.yaml")
     return parser.parse_args()
 
-
+# 读取配置文件
 def load_config(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-
+# 验证
 @torch.no_grad()
 def validate(model, loader, criterion, metric, device, save_dir=None, vis_samples=4):
-    model.eval()
+    model.eval() # 关闭dropout，BN训练
     metric.reset()
     total_loss = 0.0
     saved = False
 
+    # 遍历验证数据
     for batch in tqdm(loader, desc="val", leave=False):
         images = batch["image"].to(device, non_blocking=True)
         masks = batch["mask"].to(device, non_blocking=True)
 
-        logits = model(images)
+        logits = model(images) # 前向传播
         loss = criterion(logits, masks)
-        preds = torch.argmax(logits, dim=1)
+        preds = torch.argmax(logits, dim=1) # 得到预测类别
 
-        metric.update(preds, masks)
+        metric.update(preds, masks) # 更新指标
         total_loss += loss.item() * images.size(0)
 
         if save_dir is not None and not saved:
-            save_visualizations(batch, preds, save_dir=save_dir, max_items=vis_samples)
+            save_visualizations(batch, preds, save_dir=save_dir, max_items=vis_samples) # 保存可视化
             saved = True
 
-    results = metric.compute()
+    results = metric.compute() # 返回指标
     results["loss"] = total_loss / len(loader.dataset)
     return results
 
-
+# 训练一个epoch
 def train_one_epoch(model, loader, optimizer, criterion, device, scaler, amp):
-    model.train()
+    model.train() # 训练
     total_loss = 0.0
 
     for batch in tqdm(loader, desc="train", leave=False):
@@ -68,12 +69,13 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler, amp):
         masks = batch["mask"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
+        # 混合精度训练
         with autocast("cuda", enabled=amp):
-            logits = model(images)
+            logits = model(images) # 前向传播
             loss = criterion(logits, masks)
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
+        scaler.scale(loss).backward() # 反向传播
+        scaler.step(optimizer) # 更新参数
         scaler.update()
         total_loss += loss.item() * images.size(0)
 
@@ -81,6 +83,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler, amp):
 
 import numpy as np
 
+# 序列化
 def to_serializable(v):
     if isinstance(v, np.ndarray):
         return v.tolist()
@@ -95,14 +98,16 @@ def main():
     cfg = load_config(args.config)
     set_seed(cfg["seed"])
 
+    # 创建runs目录
     runs_root = Path(cfg["runs"]["root"])
     runs_root.mkdir(parents=True, exist_ok=True)
     split_dir = Path(cfg["data"]["split_dir"])
     split_dir.mkdir(parents=True, exist_ok=True)
 
     if not (split_dir / "train.txt").exists():
-        make_split(cfg["data"]["root"], str(split_dir), seed=cfg["seed"])
+        make_split(cfg["data"]["root"], str(split_dir), seed=cfg["seed"]) # 数据划分
 
+    # 创建实验目录
     exp_dir = runs_root / "exp"
     exp_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir = exp_dir / "checkpoints"
@@ -116,11 +121,13 @@ def main():
         yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    transforms = get_transforms(tuple(cfg["data"]["image_size"]))
+    transforms = get_transforms(tuple(cfg["data"]["image_size"])) # 加载数据增强
 
+    # 创建数据集
     train_ds = WHDLDataset(cfg["data"]["root"], str(split_dir / "train.txt"), transform=transforms["train"])
     val_ds = WHDLDataset(cfg["data"]["root"], str(split_dir / "val.txt"), transform=transforms["eval"])
 
+    # 创建DataLoader
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg["train"]["batch_size"],
@@ -136,6 +143,7 @@ def main():
         pin_memory=True,
     )
 
+    # 创建模型
     model = UNetResNet34Attn(
         num_classes=cfg["num_classes"],
         in_channels=cfg["model"]["in_channels"],
@@ -144,21 +152,24 @@ def main():
         use_aspp=cfg["model"]["use_aspp"],
     ).to(device)
 
+    # 创建Loss
     criterion = CEDiceLoss(
         num_classes=cfg["num_classes"],
         ce_weight=cfg["loss"]["ce_weight"],
         dice_weight=cfg["loss"]["dice_weight"],
     )
-    optimizer = AdamW(model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
-    scheduler = CosineAnnealingLR(optimizer, T_max=cfg["train"]["epochs"], eta_min=cfg["scheduler"]["min_lr"])
-    scaler = GradScaler("cuda", enabled=cfg["train"]["amp"])
-    metric = SegmentationMetric(cfg["num_classes"])
+    optimizer = AdamW(model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"]) # 优化器
+    scheduler = CosineAnnealingLR(optimizer, T_max=cfg["train"]["epochs"], eta_min=cfg["scheduler"]["min_lr"]) # 学习率调度
+    scaler = GradScaler("cuda", enabled=cfg["train"]["amp"]) # 创建AMP scaler，用于混合调度
+    metric = SegmentationMetric(cfg["num_classes"]) # 创建指标计算器
 
     history = []
     best_miou = -1.0
 
+    循环训练
     for epoch in range(1, cfg["train"]["epochs"] + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler, cfg["train"]["amp"])
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler, cfg["train"]["amp"]) # 训练
+        # 验证
         val_metrics = validate(
             model,
             val_loader,
@@ -168,6 +179,7 @@ def main():
             save_dir=str(vis_dir / f"epoch_{epoch:03d}"),
             vis_samples=cfg["train"]["vis_samples"],
         )
+        # 更新学习率
         scheduler.step()
 
 
@@ -179,7 +191,8 @@ def main():
             "train_loss": float(train_loss),
             **val_metrics,
         }
-        
+
+        # 保存日志
         history.append(record)
         
         with open(log_dir / "history.json", "w", encoding="utf-8") as f:
@@ -206,7 +219,8 @@ def main():
             "config": cfg,
             "class_names": CLASS_NAMES,
         }
-        
+
+        # 保存模型
         torch.save(checkpoint, ckpt_dir / "last.pth")
         
         if current_miou == best_miou:
