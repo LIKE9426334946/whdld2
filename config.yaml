@@ -4,6 +4,8 @@ class_names: [vegetation, water, road, building, pavement, bare_soil]
 
 data:
   root: /kaggle/input/datasets/thenoart/whdld-data
+  images_dir: image/Images
+  masks_dir: imagesPNG/ImagesPNG
   image_size: [256, 256]
   num_workers: 4
   split_dir: runs/splits
