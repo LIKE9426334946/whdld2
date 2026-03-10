@@ -41,11 +41,23 @@ def make_split(data_root: str, output_dir: str, train_ratio=0.8, val_ratio=0.1, 
     print(f"Total: {n}, train: {len(train_names)}, val: {len(val_names)}, test: {len(test_names)}")
     print(f"Split files saved to: {output_dir}")
 
-
 if __name__ == "__main__":
+    cfg = load_cfg()
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=str, default="data/whdld")
-    parser.add_argument("--output_dir", type=str, default="runs/splits")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        default=cfg["data"]["root"]
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=cfg["data"]["split_dir"]
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42
+    )
     args = parser.parse_args()
     make_split(args.data_root, args.output_dir, seed=args.seed)
