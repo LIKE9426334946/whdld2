@@ -166,7 +166,7 @@ def main():
     history = []
     best_miou = -1.0
 
-    循环训练
+    # 循环训练
     for epoch in range(1, cfg["train"]["epochs"] + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler, cfg["train"]["amp"]) # 训练
         # 验证
