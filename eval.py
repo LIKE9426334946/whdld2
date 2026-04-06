@@ -65,7 +65,7 @@ def main():
         num_workers=cfg["data"]["num_workers"],
         pin_memory=True,
     )
-"""
+    """
     model = UNetResNet34Attn(
         num_classes=cfg["num_classes"],
         in_channels=cfg["model"]["in_channels"],
@@ -73,7 +73,7 @@ def main():
         use_scse=cfg["model"]["use_scse"],
         use_aspp=cfg["model"]["use_aspp"],
     ).to(device)
-"""
+    """
     model = UNet(
         in_channels=cfg["model"]["in_channels"],
         num_classes=cfg["num_classes"],
