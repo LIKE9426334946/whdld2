@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from datasets.transforms import get_transforms
 from datasets.whdld_dataset import WHDLDataset
-from losses import CEDiceLoss
+from losses import CEDiceBoundaryDeepSupervisionLoss
 from models.unet_resnet_attn import UNetResNet34Attn
 from utils.metrics import SegmentationMetric
 from utils.visualize import save_visualizations
@@ -71,20 +71,29 @@ def main():
         pretrained=False,
         use_scse=cfg["model"]["use_scse"],
         use_aspp=cfg["model"]["use_aspp"],
+        use_deep_supervision=cfg["model"].get("use_deep_supervision", True),
+        use_boundary_branch=cfg["model"].get("use_boundary_branch", True),
     ).to(device)
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
-    criterion = CEDiceLoss(
+    criterion = CEDiceBoundaryDeepSupervisionLoss(
         num_classes=cfg["num_classes"],
         ce_weight=cfg["loss"]["ce_weight"],
         dice_weight=cfg["loss"]["dice_weight"],
+        ds_weight=cfg["loss"].get("ds_weight", 0.4),
+        boundary_weight=cfg["loss"].get("boundary_weight", 0.2),
     )
+
     metric = SegmentationMetric(cfg["num_classes"])
 
     total_loss = 0.0
+    total_main_loss = 0.0
+    total_ds_loss = 0.0
+    total_boundary_loss = 0.0
+
     vis_dir = Path(cfg["runs"]["root"]) / "exp" / f"eval_{args.split}"
     vis_dir.mkdir(parents=True, exist_ok=True)
     saved = False
@@ -94,12 +103,19 @@ def main():
             images = batch["image"].to(device, non_blocking=True)
             masks = batch["mask"].to(device, non_blocking=True)
 
-            logits = model(images)
-            loss = criterion(logits, masks)
+            outputs = model(images)
+            loss, loss_dict = criterion(outputs, masks)
+
+            logits = outputs["main"]
             preds = torch.argmax(logits, dim=1)
 
             metric.update(preds, masks)
-            total_loss += loss.item() * images.size(0)
+
+            batch_size = images.size(0)
+            total_loss += loss.item() * batch_size
+            total_main_loss += float(loss_dict["loss_main"]) * batch_size
+            total_ds_loss += float(loss_dict["loss_ds"]) * batch_size
+            total_boundary_loss += float(loss_dict["loss_boundary"]) * batch_size
 
             if not saved:
                 save_visualizations(batch, preds, str(vis_dir), max_items=8)
@@ -107,8 +123,10 @@ def main():
 
     results = metric.compute()
     results["loss"] = total_loss / len(loader.dataset)
+    results["loss_main"] = total_main_loss / len(loader.dataset)
+    results["loss_ds"] = total_ds_loss / len(loader.dataset)
+    results["loss_boundary"] = total_boundary_loss / len(loader.dataset)
 
-    # 转成可 JSON 序列化格式
     results = to_json_serializable(results)
 
     print(json.dumps(results, indent=2, ensure_ascii=False))
