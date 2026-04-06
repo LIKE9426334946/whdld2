@@ -11,7 +11,8 @@ from tqdm import tqdm
 from datasets.transforms import get_transforms
 from datasets.whdld_dataset import WHDLDataset
 from losses import CEDiceLoss
-from models.unet_resnet_attn import UNetResNet34Attn
+# from models.unet_resnet_attn import UNetResNet34Attn
+from models.unet import UNet
 from utils.metrics import SegmentationMetric
 from utils.visualize import save_visualizations
 
@@ -64,7 +65,7 @@ def main():
         num_workers=cfg["data"]["num_workers"],
         pin_memory=True,
     )
-
+"""
     model = UNetResNet34Attn(
         num_classes=cfg["num_classes"],
         in_channels=cfg["model"]["in_channels"],
@@ -72,7 +73,13 @@ def main():
         use_scse=cfg["model"]["use_scse"],
         use_aspp=cfg["model"]["use_aspp"],
     ).to(device)
-
+"""
+    model = UNet(
+        in_channels=cfg["model"]["in_channels"],
+        num_classes=cfg["num_classes"],
+        base_c=64,
+    ).to(device)
+    
     checkpoint = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
