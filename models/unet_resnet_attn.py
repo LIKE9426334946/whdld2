@@ -12,6 +12,17 @@ class DecoderBlock(nn.Module):
         self.conv1 = ConvBNReLU(in_channels + skip_channels, out_channels)
         self.conv2 = ConvBNReLU(out_channels, out_channels)
         self.attn = scSE(out_channels) if use_scse else nn.Identity()
+        # deep supervision heads
+        self.ds4 = nn.Conv2d(256, num_classes, 1)
+        self.ds3 = nn.Conv2d(128, num_classes, 1)
+        self.ds2 = nn.Conv2d(64, num_classes, 1)
+        self.ds1 = nn.Conv2d(64, num_classes, 1)
+
+        self.boundary_head = nn.Sequential(
+            nn.Conv2d(64, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 1, 1)
+        )
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
         x = F.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
@@ -71,16 +82,46 @@ class UNetResNet34Attn(nn.Module):
         self.head = nn.Conv2d(64, num_classes, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        s1 = self.stem(x)
-        s2 = self.layer1(self.maxpool(s1))
-        s3 = self.layer2(s2)
-        s4 = self.layer3(s3)
-        x = self.layer4(s4)
+        # s1 = self.stem(x)
+        # s2 = self.layer1(self.maxpool(s1))
+        # s3 = self.layer2(s2)
+        # s4 = self.layer3(s3)
+        # x = self.layer4(s4)
 
-        x = self.bottleneck(x)
-        x = self.dec4(x, self.skip4(s4))
-        x = self.dec3(x, self.skip3(s3))
-        x = self.dec2(x, self.skip2(s2))
-        x = self.dec1(x, self.skip1(s1))
-        x = self.final_up(x)
-        return self.head(x)
+        # x = self.bottleneck(x)
+        # x = self.dec4(x, self.skip4(s4))
+        # x = self.dec3(x, self.skip3(s3))
+        # x = self.dec2(x, self.skip2(s2))
+        # x = self.dec1(x, self.skip1(s1))
+        # x = self.final_up(x)
+        # return self.head(x)
+        # decoder
+        d4 = self.dec4(x, self.skip4(s4))
+        d3 = self.dec3(d4, self.skip3(s3))
+        d2 = self.dec2(d3, self.skip2(s2))
+        d1 = self.dec1(d2, self.skip1(s1))
+        
+        out = self.final_up(d1)
+        logits = self.head(out)
+        
+        # ===== Deep Supervision =====
+        ds4 = self.ds4(d4)
+        ds3 = self.ds3(d3)
+        ds2 = self.ds2(d2)
+        ds1 = self.ds1(d1)
+        
+        # 上采样到原尺寸
+        ds4 = F.interpolate(ds4, size=logits.shape[-2:], mode="bilinear", align_corners=False)
+        ds3 = F.interpolate(ds3, size=logits.shape[-2:], mode="bilinear", align_corners=False)
+        ds2 = F.interpolate(ds2, size=logits.shape[-2:], mode="bilinear", align_corners=False)
+        ds1 = F.interpolate(ds1, size=logits.shape[-2:], mode="bilinear", align_corners=False)
+        
+        # ===== Boundary =====
+        boundary = self.boundary_head(d1)
+        boundary = F.interpolate(boundary, size=logits.shape[-2:], mode="bilinear", align_corners=False)
+        
+        return {
+            "main": logits,
+            "ds": [ds1, ds2, ds3, ds4],
+            "boundary": boundary
+        }
