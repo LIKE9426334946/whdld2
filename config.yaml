@@ -11,11 +11,9 @@ data:
   split_dir: runs/splits
 
 model:
-  name: unet_resnet34_attn
+  name: unet
   in_channels: 3
-  pretrained: true
-  use_scse: true
-  use_aspp: true
+  base_c: 64
 
 train:
   batch_size: 16
