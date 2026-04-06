@@ -2,6 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def boundary_loss(pred, target):
+    # target: [B,H,W]
+    # 转成边界图（简单版）
+    edge = F.max_pool2d(target.float().unsqueeze(1), 3, stride=1, padding=1) != \
+           F.min_pool2d(target.float().unsqueeze(1), 3, stride=1, padding=1)
+
+    edge = edge.float()
+    return F.binary_cross_entropy_with_logits(pred, edge)
 
 class DiceLoss(nn.Module):
     def __init__(self, num_classes: int, smooth: float = 1e-6):
