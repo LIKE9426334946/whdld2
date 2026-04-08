@@ -11,7 +11,7 @@ data:
   split_dir: runs/splits
 
 model:
-  name: unet
+  name: linknet
   in_channels: 3
   base_c: 64
 
