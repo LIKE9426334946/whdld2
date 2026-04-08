@@ -11,8 +11,8 @@ from tqdm import tqdm
 from datasets.transforms import get_transforms
 from datasets.whdld_dataset import WHDLDataset
 from losses import CEDiceLoss
-# from models.unet_resnet_attn import UNetResNet34Attn
-from models.unet import UNet
+# from models.deeplabv3plus import DeepLabV3Plus
+from models.deeplabv3plus import DeepLabV3Plus
 from utils.metrics import SegmentationMetric
 from utils.visualize import save_visualizations
 
@@ -66,18 +66,15 @@ def main():
         pin_memory=True,
     )
     """
-    model = UNetResNet34Attn(
+    model = DeepLabV3Plus(
         num_classes=cfg["num_classes"],
         in_channels=cfg["model"]["in_channels"],
         pretrained=False,
-        use_scse=cfg["model"]["use_scse"],
-        use_aspp=cfg["model"]["use_aspp"],
     ).to(device)
     """
-    model = UNet(
+    model = DeepLabV3Plus(
         in_channels=cfg["model"]["in_channels"],
         num_classes=cfg["num_classes"],
-        base_c=64,
     ).to(device)
     
     checkpoint = torch.load(args.checkpoint, map_location=device)

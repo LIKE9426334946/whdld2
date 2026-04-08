@@ -9,7 +9,7 @@ from torchvision.transforms import functional as TF
 import torchvision.transforms as T
 
 from datasets.whdld_dataset import ID2COLOR
-from models.unet_resnet_attn import UNetResNet34Attn
+from models.deeplabv3plus import DeepLabV3Plus
 from utils.visualize import overlay
 
 
@@ -54,12 +54,10 @@ def main():
         cfg = yaml.safe_load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNetResNet34Attn(
+    model = DeepLabV3Plus(
         num_classes=cfg["num_classes"],
         in_channels=cfg["model"]["in_channels"],
         pretrained=False,
-        use_scse=cfg["model"]["use_scse"],
-        use_aspp=cfg["model"]["use_aspp"],
     ).to(device)
     checkpoint = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
