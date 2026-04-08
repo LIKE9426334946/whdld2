@@ -14,7 +14,8 @@ import yaml
 from datasets.transforms import get_transforms
 from datasets.whdld_dataset import CLASS_NAMES, WHDLDataset
 from losses import CEDiceLoss
-from models.unet_resnet_attn import UNetResNet34Attn
+# from models.linknet import LinkNet
+from models.linknet import LinkNet
 from utils.metrics import SegmentationMetric
 from utils.seed import set_seed
 from utils.split import make_split
@@ -143,13 +144,21 @@ def main():
         pin_memory=True,
     )
 
+
     # 创建模型
-    model = UNetResNet34Attn(
+    """
+    model = LinkNet(
         num_classes=cfg["num_classes"],
         in_channels=cfg["model"]["in_channels"],
         pretrained=cfg["model"]["pretrained"],
         use_scse=cfg["model"]["use_scse"],
         use_aspp=cfg["model"]["use_aspp"],
+    ).to(device)
+    """
+
+    model = LinkNet(
+        in_channels=cfg["model"]["in_channels"],
+        num_classes=cfg["num_classes"],
     ).to(device)
 
     # 创建Loss
