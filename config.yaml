@@ -38,3 +38,6 @@ loss:
 
 runs:
   root: runs
+
+other:
+  model: unet
