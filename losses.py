@@ -147,10 +147,6 @@ class CEDiceBoundaryDeepSupervisionLoss(nn.Module):
 
 
 class CEDiceLoss(nn.Module):
-    """
-    兼容你原来代码的旧接口。
-    如果你暂时还没改 train.py，也可以继续用这个类做普通 CE+Dice。
-    """
     def __init__(self, num_classes: int, ce_weight: float = 1.0, dice_weight: float = 0.5):
         super().__init__()
         self.seg_loss = SegLoss(
