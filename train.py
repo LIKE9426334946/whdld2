@@ -14,7 +14,7 @@ import yaml
 from datasets.transforms import get_transforms
 from datasets.whdld_dataset import CLASS_NAMES, WHDLDataset
 from losses import CEDiceBoundaryDeepSupervisionLoss
-from models.unet_resnet_attn import UNetResNet34Attn
+from models.factory import build_model
 from utils.metrics import SegmentationMetric
 from utils.seed import set_seed
 from utils.split import make_split
@@ -174,15 +174,7 @@ def main():
         pin_memory=True,
     )
 
-    model = UNetResNet34Attn(
-        num_classes=cfg["num_classes"],
-        in_channels=cfg["model"]["in_channels"],
-        pretrained=cfg["model"]["pretrained"],
-        use_scse=cfg["model"]["use_scse"],
-        use_aspp=cfg["model"]["use_aspp"],
-        use_deep_supervision=cfg["model"].get("use_deep_supervision", True),
-        use_boundary_branch=cfg["model"].get("use_boundary_branch", True),
-    ).to(device)
+    model = build_model(cfg["model"], cfg["num_classes"]).to(device)
 
     criterion = CEDiceBoundaryDeepSupervisionLoss(
         num_classes=cfg["num_classes"],
