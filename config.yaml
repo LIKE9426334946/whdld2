@@ -11,7 +11,7 @@ data:
   split_dir: runs/splits
   
 model:
-  name: baseline_resnet34
+  name: resnet34_attn
   in_channels: 3
   pretrained: true
   use_deep_supervision: true
