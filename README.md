@@ -16,3 +16,10 @@ python3 train.py
 
 **评估模型**  
 python3 eval.py
+
+
+## 模型分组（支持你图里的实验结构）
+在 `config.yaml` 里通过 `model.name` 切换：
+- `baseline_resnet34`：基线 + ResNet
+- `resnet34_attn`：基线 + ResNet + 注意力机制（scSE）
+- `resnet34_attn_aspp`：基线 + ResNet + 注意力机制 + ASPP

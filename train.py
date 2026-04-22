@@ -1,8 +1,8 @@
 import argparse
 import json
-import os
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
@@ -13,77 +13,101 @@ import yaml
 
 from datasets.transforms import get_transforms
 from datasets.whdld_dataset import CLASS_NAMES, WHDLDataset
-from losses import CEDiceLoss
-from models.unet_resnet_attn import UNetResNet34Attn
+from losses import CEDiceBoundaryDeepSupervisionLoss
+from models.factory import build_model
 from utils.metrics import SegmentationMetric
 from utils.seed import set_seed
 from utils.split import make_split
 from utils.visualize import save_visualizations
 
-# 解析参数
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="config.yaml")
     return parser.parse_args()
 
-# 读取配置文件
+
 def load_config(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-# 验证
+
 @torch.no_grad()
 def validate(model, loader, criterion, metric, device, save_dir=None, vis_samples=4):
-    model.eval() # 关闭dropout，BN训练
+    model.eval()
     metric.reset()
     total_loss = 0.0
+    total_main_loss = 0.0
+    total_ds_loss = 0.0
+    total_boundary_loss = 0.0
     saved = False
 
-    # 遍历验证数据
     for batch in tqdm(loader, desc="val", leave=False):
         images = batch["image"].to(device, non_blocking=True)
         masks = batch["mask"].to(device, non_blocking=True)
 
-        logits = model(images) # 前向传播
-        loss = criterion(logits, masks)
-        preds = torch.argmax(logits, dim=1) # 得到预测类别
+        outputs = model(images)
+        loss, loss_dict = criterion(outputs, masks)
 
-        metric.update(preds, masks) # 更新指标
-        total_loss += loss.item() * images.size(0)
+        logits = outputs["main"]
+        preds = torch.argmax(logits, dim=1)
+
+        metric.update(preds, masks)
+        batch_size = images.size(0)
+
+        total_loss += loss.item() * batch_size
+        total_main_loss += float(loss_dict["loss_main"]) * batch_size
+        total_ds_loss += float(loss_dict["loss_ds"]) * batch_size
+        total_boundary_loss += float(loss_dict["loss_boundary"]) * batch_size
 
         if save_dir is not None and not saved:
-            save_visualizations(batch, preds, save_dir=save_dir, max_items=vis_samples) # 保存可视化
+            save_visualizations(batch, preds, save_dir=save_dir, max_items=vis_samples)
             saved = True
 
-    results = metric.compute() # 返回指标
+    results = metric.compute()
     results["loss"] = total_loss / len(loader.dataset)
+    results["loss_main"] = total_main_loss / len(loader.dataset)
+    results["loss_ds"] = total_ds_loss / len(loader.dataset)
+    results["loss_boundary"] = total_boundary_loss / len(loader.dataset)
     return results
 
-# 训练一个epoch
+
 def train_one_epoch(model, loader, optimizer, criterion, device, scaler, amp):
-    model.train() # 训练
+    model.train()
     total_loss = 0.0
+    total_main_loss = 0.0
+    total_ds_loss = 0.0
+    total_boundary_loss = 0.0
 
     for batch in tqdm(loader, desc="train", leave=False):
         images = batch["image"].to(device, non_blocking=True)
         masks = batch["mask"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
-        # 混合精度训练
+
         with autocast("cuda", enabled=amp):
-            logits = model(images) # 前向传播
-            loss = criterion(logits, masks)
+            outputs = model(images)
+            loss, loss_dict = criterion(outputs, masks)
 
-        scaler.scale(loss).backward() # 反向传播
-        scaler.step(optimizer) # 更新参数
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
         scaler.update()
-        total_loss += loss.item() * images.size(0)
 
-    return total_loss / len(loader.dataset)
+        batch_size = images.size(0)
+        total_loss += loss.item() * batch_size
+        total_main_loss += float(loss_dict["loss_main"]) * batch_size
+        total_ds_loss += float(loss_dict["loss_ds"]) * batch_size
+        total_boundary_loss += float(loss_dict["loss_boundary"]) * batch_size
 
-import numpy as np
+    num_samples = len(loader.dataset)
+    return {
+        "loss": total_loss / num_samples,
+        "loss_main": total_main_loss / num_samples,
+        "loss_ds": total_ds_loss / num_samples,
+        "loss_boundary": total_boundary_loss / num_samples,
+    }
 
-# 序列化
+
 def to_serializable(v):
     if isinstance(v, np.ndarray):
         return v.tolist()
@@ -93,23 +117,24 @@ def to_serializable(v):
         return v.detach().cpu().item() if v.numel() == 1 else v.detach().cpu().tolist()
     return v
 
+
 def main():
     args = parse_args()
     cfg = load_config(args.config)
     set_seed(cfg["seed"])
 
-    # 创建runs目录
     runs_root = Path(cfg["runs"]["root"])
     runs_root.mkdir(parents=True, exist_ok=True)
+
     split_dir = Path(cfg["data"]["split_dir"])
     split_dir.mkdir(parents=True, exist_ok=True)
 
     if not (split_dir / "train.txt").exists():
-        make_split(cfg["data"]["root"], str(split_dir), seed=cfg["seed"]) # 数据划分
+        make_split(cfg["data"]["root"], str(split_dir), seed=cfg["seed"])
 
-    # 创建实验目录
     exp_dir = runs_root / "exp"
     exp_dir.mkdir(parents=True, exist_ok=True)
+
     ckpt_dir = exp_dir / "checkpoints"
     vis_dir = exp_dir / "visualizations"
     log_dir = exp_dir / "logs"
@@ -121,13 +146,19 @@ def main():
         yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    transforms = get_transforms(tuple(cfg["data"]["image_size"])) # 加载数据增强
+    transforms = get_transforms(tuple(cfg["data"]["image_size"]))
 
-    # 创建数据集
-    train_ds = WHDLDataset(cfg["data"]["root"], str(split_dir / "train.txt"), transform=transforms["train"])
-    val_ds = WHDLDataset(cfg["data"]["root"], str(split_dir / "val.txt"), transform=transforms["eval"])
+    train_ds = WHDLDataset(
+        cfg["data"]["root"],
+        str(split_dir / "train.txt"),
+        transform=transforms["train"]
+    )
+    val_ds = WHDLDataset(
+        cfg["data"]["root"],
+        str(split_dir / "val.txt"),
+        transform=transforms["eval"]
+    )
 
-    # 创建DataLoader
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg["train"]["batch_size"],
@@ -143,33 +174,37 @@ def main():
         pin_memory=True,
     )
 
-    # 创建模型
-    model = UNetResNet34Attn(
-        num_classes=cfg["num_classes"],
-        in_channels=cfg["model"]["in_channels"],
-        pretrained=cfg["model"]["pretrained"],
-        use_scse=cfg["model"]["use_scse"],
-        use_aspp=cfg["model"]["use_aspp"],
-    ).to(device)
+    model = build_model(cfg["model"], cfg["num_classes"]).to(device)
 
-    # 创建Loss
-    criterion = CEDiceLoss(
+    criterion = CEDiceBoundaryDeepSupervisionLoss(
         num_classes=cfg["num_classes"],
         ce_weight=cfg["loss"]["ce_weight"],
         dice_weight=cfg["loss"]["dice_weight"],
+        ds_weight=cfg["loss"].get("ds_weight", 0.4),
+        boundary_weight=cfg["loss"].get("boundary_weight", 0.2),
     )
-    optimizer = AdamW(model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"]) # 优化器
-    scheduler = CosineAnnealingLR(optimizer, T_max=cfg["train"]["epochs"], eta_min=cfg["scheduler"]["min_lr"]) # 学习率调度
-    scaler = GradScaler("cuda", enabled=cfg["train"]["amp"]) # 创建AMP scaler，用于混合调度
-    metric = SegmentationMetric(cfg["num_classes"]) # 创建指标计算器
+
+    optimizer = AdamW(
+        model.parameters(),
+        lr=cfg["train"]["lr"],
+        weight_decay=cfg["train"]["weight_decay"]
+    )
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=cfg["train"]["epochs"],
+        eta_min=cfg["scheduler"]["min_lr"]
+    )
+    scaler = GradScaler("cuda", enabled=cfg["train"]["amp"])
+    metric = SegmentationMetric(cfg["num_classes"])
 
     history = []
     best_miou = -1.0
 
-    # 循环训练
     for epoch in range(1, cfg["train"]["epochs"] + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler, cfg["train"]["amp"]) # 训练
-        # 验证
+        train_stats = train_one_epoch(
+            model, train_loader, optimizer, criterion, device, scaler, cfg["train"]["amp"]
+        )
+
         val_metrics = validate(
             model,
             val_loader,
@@ -179,36 +214,43 @@ def main():
             save_dir=str(vis_dir / f"epoch_{epoch:03d}"),
             vis_samples=cfg["train"]["vis_samples"],
         )
-        # 更新学习率
+
         scheduler.step()
 
-
         val_metrics = {k: to_serializable(v) for k, v in val_metrics.items()}
+        train_stats = {k: to_serializable(v) for k, v in train_stats.items()}
 
         record = {
             "epoch": int(epoch),
             "lr": float(optimizer.param_groups[0]["lr"]),
-            "train_loss": float(train_loss),
+            "train_loss": float(train_stats["loss"]),
+            "train_loss_main": float(train_stats["loss_main"]),
+            "train_loss_ds": float(train_stats["loss_ds"]),
+            "train_loss_boundary": float(train_stats["loss_boundary"]),
             **val_metrics,
         }
 
-        # 保存日志
         history.append(record)
-        
+
         with open(log_dir / "history.json", "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
-            
+
         print(
             f"Epoch [{epoch:03d}/{cfg['train']['epochs']:03d}] "
-            f"train_loss={train_loss:.4f} val_loss={val_metrics['loss']:.4f} "
-            f"mIoU={val_metrics['mIoU']:.4f} mPA={val_metrics['mPA']:.4f} "
-            f"Precision={val_metrics['Precision']:.4f} Recall={val_metrics['Recall']:.4f}"
+            f"train_loss={train_stats['loss']:.4f} "
+            f"(main={train_stats['loss_main']:.4f}, ds={train_stats['loss_ds']:.4f}, boundary={train_stats['loss_boundary']:.4f}) "
+            f"val_loss={val_metrics['loss']:.4f} "
+            f"(main={val_metrics['loss_main']:.4f}, ds={val_metrics['loss_ds']:.4f}, boundary={val_metrics['loss_boundary']:.4f}) "
+            f"mIoU={val_metrics['mIoU']:.4f} "
+            f"mPA={val_metrics['mPA']:.4f} "
+            f"Precision={val_metrics['Precision']:.4f} "
+            f"Recall={val_metrics['Recall']:.4f}"
         )
+
         current_miou = float(val_metrics["mIoU"])
-        
         if current_miou > best_miou:
             best_miou = current_miou
-        
+
         checkpoint = {
             "epoch": int(epoch),
             "model_state_dict": model.state_dict(),
@@ -220,13 +262,11 @@ def main():
             "class_names": CLASS_NAMES,
         }
 
-        # 保存模型
         torch.save(checkpoint, ckpt_dir / "last.pth")
-        
+
         if current_miou == best_miou:
             torch.save(checkpoint, ckpt_dir / "best.pth")
             print(f"[*] Best model updated at epoch {epoch}, mIoU={best_miou:.4f}")
-
 
     print(f"Training finished. Best mIoU: {best_miou:.4f}")
     print(f"All outputs saved under: {exp_dir}")
